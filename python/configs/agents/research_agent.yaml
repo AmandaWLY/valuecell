@@ -9,11 +9,11 @@ enabled: true
 models:
   # Primary model for reasoning and generation
   primary:
-    model_id: "google/gemini-2.5-flash"
+    model_id: "anthropic/claude-haiku-4.5"
     provider: "openrouter"
     parameters:
-      # temperature: 0.7
-      # max_tokens: 8192
+      temperature: 0.7
+      max_tokens: 8192
   
   # Embedding model for knowledge base
   # Note: If not specified, will auto-select from available providers

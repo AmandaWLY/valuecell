@@ -19,6 +19,13 @@ defaults:
   temperature: 0.5
   max_tokens: 4096
 
+# Connection settings for rate limit handling
+connection_settings:
+  timeout: 60
+  max_retries: 3
+  retry_delay: 1  # Initial delay in seconds
+  retry_backoff: 2  # Exponential backoff multiplier
+
 # Extra headers for OpenRouter API
 extra_headers:
   HTTP-Referer: "https://valuecell.ai"

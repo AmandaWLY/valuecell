@@ -37,8 +37,18 @@ class AgentClient:
             self._initialized = True
 
     async def _setup_client(self):
-        """Set up the HTTP client and resolve the agent card."""
-        self._httpx_client = httpx.AsyncClient(timeout=30)
+        """Set up the HTTP client with retry logic and resolve the agent card."""
+        from httpx import Timeout, Limits
+        
+        # Create transport with retry logic for rate limiting
+        transport = httpx.AsyncHTTPTransport(retries=3)
+        
+        # Configure client with retry support
+        self._httpx_client = httpx.AsyncClient(
+            timeout=Timeout(60.0, connect=10.0),
+            transport=transport,
+            limits=Limits(max_keepalive_connections=5, max_connections=10)
+        )
 
         config = ClientConfig(
             httpx_client=self._httpx_client,
