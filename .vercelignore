@@ -1,0 +1,33 @@
+# Python backend (not needed for frontend deployment)
+python/
+logs/
+
+# Tauri (desktop app files)
+frontend/src-tauri/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development files
+.env
+.env.*
+*.log
+
+# Version control
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Node modules (will be reinstalled)
+**/node_modules/
+
+# Database
+*.db
+*.sqlite
+
