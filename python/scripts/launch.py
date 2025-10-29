@@ -55,19 +55,19 @@ ENV_PATH_STR = ENV_PATH.as_posix()
 MAP_NAME_COMMAND: Dict[str, str] = {}
 for name, analyst in MAP_NAME_ANALYST.items():
     MAP_NAME_COMMAND[name] = (
-        f"cd {PYTHON_DIR_STR}/third_party/ai-hedge-fund && uv run --env-file {ENV_PATH_STR} -m adapter --analyst {analyst}"
+        f'cd "{PYTHON_DIR_STR}/third_party/ai-hedge-fund" && uv run --env-file "{ENV_PATH_STR}" -m adapter --analyst {analyst}'
     )
 MAP_NAME_COMMAND[TRADING_AGENTS_NAME] = (
-    f"cd {PYTHON_DIR_STR}/third_party/TradingAgents && uv run --env-file {ENV_PATH_STR} -m adapter"
+    f'cd "{PYTHON_DIR_STR}/third_party/TradingAgents" && uv run --env-file "{ENV_PATH_STR}" -m adapter'
 )
 MAP_NAME_COMMAND[RESEARCH_AGENT_NAME] = (
-    f"uv run --env-file {ENV_PATH_STR} -m valuecell.agents.research_agent"
+    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.research_agent'
 )
 MAP_NAME_COMMAND[AUTO_TRADING_AGENT_NAME] = (
-    f"uv run --env-file {ENV_PATH_STR} -m valuecell.agents.auto_trading_agent"
+    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.auto_trading_agent'
 )
 BACKEND_COMMAND = (
-    f"cd {PYTHON_DIR_STR} && uv run --env-file {ENV_PATH_STR} -m valuecell.server.main"
+    f'cd "{PYTHON_DIR_STR}" && uv run --env-file "{ENV_PATH_STR}" -m valuecell.server.main'
 )
 FRONTEND_URL = "http://localhost:1420"
 
