@@ -4,6 +4,7 @@ Allows users to select an agent from available options and launch it using uv.
 """
 
 import os
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -45,9 +46,15 @@ ENV_PATH = PROJECT_DIR / ".env"
 
 # Convert paths to POSIX format (forward slashes) for cross-platform compatibility
 # as_posix() works on both Windows and Unix systems
+# Keep unquoted versions for Python path operations and quoted versions for shell commands
 PROJECT_DIR_STR = PROJECT_DIR.as_posix()
 PYTHON_DIR_STR = PYTHON_DIR.as_posix()
 ENV_PATH_STR = ENV_PATH.as_posix()
+
+# Create properly quoted versions for shell commands using shlex.quote()
+PROJECT_DIR_QUOTED = shlex.quote(PROJECT_DIR_STR)
+PYTHON_DIR_QUOTED = shlex.quote(PYTHON_DIR_STR)
+ENV_PATH_QUOTED = shlex.quote(ENV_PATH_STR)
 
 AUTO_TRADING_ENV_OVERRIDES = {
     "AUTO_TRADING_EXCHANGE": os.getenv("AUTO_TRADING_EXCHANGE"),
@@ -61,25 +68,26 @@ if AUTO_TRADING_ENV_PREFIX:
     AUTO_TRADING_ENV_PREFIX = f"{AUTO_TRADING_ENV_PREFIX} "
 
 # Mapping from agent name to launch command
+# Use quoted versions for shell commands and relative paths for .env to avoid issues with spaces
 MAP_NAME_COMMAND: Dict[str, str] = {}
 for name, analyst in MAP_NAME_ANALYST.items():
     MAP_NAME_COMMAND[name] = (
-        f'cd "{PYTHON_DIR_STR}/third_party/ai-hedge-fund" && uv run --env-file "{ENV_PATH_STR}" -m adapter --analyst {analyst}'
+        f'cd {PYTHON_DIR_QUOTED}/third_party/ai-hedge-fund && uv run --env-file ../../../.env -m adapter --analyst {analyst}'
     )
 MAP_NAME_COMMAND[TRADING_AGENTS_NAME] = (
-    f'cd "{PYTHON_DIR_STR}/third_party/TradingAgents" && uv run --env-file "{ENV_PATH_STR}" -m adapter'
+    f'cd {PYTHON_DIR_QUOTED}/third_party/TradingAgents && uv run --env-file ../../../.env -m adapter'
 )
 MAP_NAME_COMMAND[RESEARCH_AGENT_NAME] = (
-    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.research_agent'
+    f'cd {PYTHON_DIR_QUOTED} && uv run --env-file ../.env -m valuecell.agents.research_agent'
 )
 MAP_NAME_COMMAND[AUTO_TRADING_AGENT_NAME] = (
-    f'{AUTO_TRADING_ENV_PREFIX}uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.auto_trading_agent'
+    f'{AUTO_TRADING_ENV_PREFIX}cd {PYTHON_DIR_QUOTED} && uv run --env-file ../.env -m valuecell.agents.auto_trading_agent'
 )
 MAP_NAME_COMMAND[NEWS_AGENT_NAME] = (
-    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.news_agent'
+    f'cd {PYTHON_DIR_QUOTED} && uv run --env-file ../.env -m valuecell.agents.news_agent'
 )
 BACKEND_COMMAND = (
-    f'cd "{PYTHON_DIR_STR}" && uv run --env-file "{ENV_PATH_STR}" -m valuecell.server.main'
+    f'cd {PYTHON_DIR_QUOTED} && uv run --env-file ../.env -m valuecell.server.main'
 )
 FRONTEND_URL = "http://localhost:1420"
 
@@ -93,8 +101,52 @@ def check_envfile_is_set():
         exit(1)
 
 
+def validate_agents_before_launch(agents: list[str]) -> bool:
+    """Validate agent configurations before starting
+    
+    Args:
+        agents: List of agent names to validate
+        
+    Returns:
+        True if all agents are valid, False otherwise
+    """
+    try:
+        from valuecell.utils.config_validator import validate_agent_config
+        
+        all_valid = True
+        for agent_name in agents:
+            try:
+                is_valid, warnings = validate_agent_config(agent_name)
+                if warnings:
+                    print(f"⚠️  {agent_name} configuration warnings:")
+                    for warning in warnings:
+                        print(f"   - {warning}")
+                    print()
+                    if not is_valid:
+                        all_valid = False
+            except Exception as e:
+                print(f"❌ Failed to validate {agent_name}: {e}")
+                all_valid = False
+        
+        return all_valid
+    except ImportError as e:
+        print(f"⚠️  Could not import config validator: {e}")
+        print("   Skipping validation checks...")
+        return True
+    except Exception as e:
+        print(f"⚠️  Error during validation: {e}")
+        print("   Continuing with launch...")
+        return True
+
+
 def main():
     check_envfile_is_set()
+    
+    # Validate agent configurations before launch
+    print("Validating agent configurations...")
+    validate_agents_before_launch(AGENTS)
+    print()
+    
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     log_dir = f"{PROJECT_DIR_STR}/logs/{timestamp}"
 

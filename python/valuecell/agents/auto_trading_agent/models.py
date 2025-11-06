@@ -42,8 +42,7 @@ class TradingRequest(BaseModel):
     )
     initial_capital: Optional[float] = Field(
         default=DEFAULT_INITIAL_CAPITAL,
-        description="Initial capital for trading in USD",
-        gt=0,
+        description="Initial capital for trading in USD (must be positive)",
     )
     use_ai_signals: Optional[bool] = Field(
         default=False,
@@ -69,6 +68,13 @@ class TradingRequest(BaseModel):
         default=None,
         description="OKX trading mode (cash, cross, isolated); defaults to cash",
     )
+
+    @field_validator("initial_capital")
+    @classmethod
+    def validate_initial_capital(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Initial capital must be positive")
+        return v
 
     @field_validator("crypto_symbols")
     @classmethod

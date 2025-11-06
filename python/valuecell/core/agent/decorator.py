@@ -158,6 +158,8 @@ class GenericAgentExecutor(AgentExecutor):
                 f"Task received by {agent_name}", context_id, task_id
             ),
         )
+        # Track if we've set a terminal state to avoid calling complete() on already-terminal tasks
+        task_terminated = False
         try:
             # Extract dependencies from task metadata
             dependencies = task_meta.get(DEPENDENCIES)
@@ -177,9 +179,9 @@ class GenericAgentExecutor(AgentExecutor):
 
                 response_event = response.event
                 if EventPredicates.is_task_failed(response_event):
-                    raise RuntimeError(
-                        f"Agent {agent_name} reported failure: {response.content}"
-                    )
+                    # Don't double-wrap the error message - the agent already provided a clear message
+                    # Just raise with the agent's message directly
+                    raise RuntimeError(response.content or f"Agent {agent_name} reported failure")
 
                 metadata = {"response_event": response_event.value}
                 if EventPredicates.is_tool_call(response_event):
@@ -212,14 +214,25 @@ class GenericAgentExecutor(AgentExecutor):
                 )
 
         except Exception as e:
-            message = f"Error during {agent_name} agent execution: {e}"
+            # If the error is a RuntimeError from agent.failed(), use the message directly
+            # (We changed line 184 to pass the agent's message directly, not wrapped)
+            if isinstance(e, RuntimeError):
+                # This is from agent.failed() - use message directly
+                message = str(e)
+            else:
+                # Other exceptions - add context
+                message = f"Error during {agent_name} agent execution: {e}"
             logger.error(message)
             await updater.update_status(
                 TaskState.failed,
                 message=new_agent_text_message(message, context_id, task_id),
             )
+            # Mark task as terminated - don't call complete() after failed status
+            task_terminated = True
         finally:
-            await updater.complete()
+            # Only complete if not already in terminal state
+            if not task_terminated:
+                await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel the current agent execution.

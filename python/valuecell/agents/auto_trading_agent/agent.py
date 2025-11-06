@@ -519,7 +519,23 @@ class AutoTradingAgent(BaseAgent):
             response = await self.parser_agent.arun(parse_prompt)
             trading_request = response.content
 
+            # Validate response type
+            if isinstance(trading_request, str):
+                # Parser failed - response.content is error message
+                logger.error(f"Parser returned string instead of TradingRequest: {trading_request}")
+                raise ValueError(
+                    f"Could not parse trading configuration from query: {query}\n"
+                    f"Parser error: {trading_request}"
+                )
+
+            if not isinstance(trading_request, TradingRequest):
+                logger.error(f"Unexpected response type: {type(trading_request)}")
+                raise ValueError(
+                    f"Parser returned unexpected type: {type(trading_request).__name__}"
+                )
+
             logger.info(f"Parsed trading request: {trading_request}")
+            logger.info(f"Parsed request: {trading_request.model_dump()}")
             return trading_request
 
         except Exception as e:
@@ -968,10 +984,29 @@ class AutoTradingAgent(BaseAgent):
             try:
                 trading_request = await self._parse_trading_request(query)
                 logger.info(f"Parsed request: {trading_request}")
+            except ValueError as e:
+                # Use the actual error message from the parser
+                error_msg = str(e)
+                logger.error(f"Failed to parse trading request: {error_msg}")
+                # Extract the helpful part of the error message
+                if "Parser error:" in error_msg:
+                    # Use the parser's specific error message
+                    parser_error = error_msg.split("Parser error:")[-1].strip()
+                    yield streaming.failed(
+                        f"**Parse Error**: {parser_error}\n\n"
+                        "Please specify cryptocurrency symbols (e.g., 'Trade Bitcoin and Ethereum')."
+                    )
+                else:
+                    # Fallback to generic message
+                    yield streaming.failed(
+                        f"**Parse Error**: {error_msg}\n\n"
+                        "Please specify cryptocurrency symbols (e.g., 'Trade Bitcoin and Ethereum')."
+                    )
+                return
             except Exception as e:
-                logger.error(f"Failed to parse trading request: {e}")
+                logger.error(f"Unexpected error parsing trading request: {e}")
                 yield streaming.failed(
-                    "**Parse Error**: Could not parse trading configuration from your query. "
+                    f"**Error**: Could not parse trading configuration from your query: {e}\n\n"
                     "Please specify cryptocurrency symbols (e.g., 'Trade Bitcoin and Ethereum')."
                 )
                 return

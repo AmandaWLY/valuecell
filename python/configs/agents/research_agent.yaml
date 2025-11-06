@@ -22,13 +22,14 @@ models:
   # Embedding model for knowledge base
   # Note: If not specified, will auto-select from available providers
   embedding:
-    model_id: "Qwen/Qwen3-Embedding-4B"  # Optional, uses provider default
-    provider: "siliconflow"  # Must explicitly specify provider
-    # Provider-specific embedding model mappings for fallback
+    model_id: "gemini-embedding-001"  # Google's embedding model
+    provider: "google"  # Use available provider
+    # Fallback options
     provider_models:
-      google: "gemini-embedding-001"
+      openai: "text-embedding-3-small"
+      siliconflow: "Qwen/Qwen3-Embedding-4B"  # Only if API key available
     parameters:
-      dimensions: ${EMBEDDER_DIMENSION:2560}
+      dimensions: ${EMBEDDER_DIMENSION:768}  # Default for gemini-embedding-001
       # encoding_format: "float"
 
 # Environment Variable Overrides

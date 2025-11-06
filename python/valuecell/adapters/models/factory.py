@@ -102,23 +102,7 @@ class OpenRouterProvider(ModelProvider):
         # Get extra headers from config
         extra_headers = self.config.extra_config.get("extra_headers", {})
 
-        # Get connection settings for retry configuration
-        connection_settings = self.config.extra_config.get("connection_settings", {})
-        timeout = connection_settings.get("timeout", 60.0)
-        max_retries = connection_settings.get("max_retries", 3)
-
-        logger.info(f"Creating OpenRouter model: {model_id} (timeout={timeout}s, max_retries={max_retries})")
-
-        # Prepare http_client_kwargs with retry configuration
-        http_client_kwargs = {
-            "timeout": timeout,
-        }
-        
-        # Add retries if specified
-        if max_retries > 0:
-            http_client_kwargs["transport"] = {
-                "retries": max_retries
-            }
+        logger.info(f"Creating OpenRouter model: {model_id}")
 
         return OpenRouter(
             id=model_id,
@@ -130,7 +114,6 @@ class OpenRouterProvider(ModelProvider):
             top_p=params.get("top_p"),
             frequency_penalty=params.get("frequency_penalty"),
             presence_penalty=params.get("presence_penalty"),
-            http_client_kwargs=http_client_kwargs,
         )
 
 
