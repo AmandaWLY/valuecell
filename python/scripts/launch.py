@@ -31,15 +31,13 @@ MAP_NAME_ANALYST: Dict[str, str] = {
 TRADING_AGENTS_NAME = "TradingAgents"
 RESEARCH_AGENT_NAME = "ResearchAgent"
 AUTO_TRADING_AGENT_NAME = "AutoTradingAgent"
+NEWS_AGENT_NAME = "NewsAgent"
 # AGENTS = list(MAP_NAME_ANALYST.keys()) + [
 #     TRADING_AGENTS_NAME,
 #     RESEARCH_AGENT_NAME,
 #     AUTO_TRADING_AGENT_NAME,
 # ]
-AGENTS = [
-    RESEARCH_AGENT_NAME,
-    AUTO_TRADING_AGENT_NAME,
-]
+AGENTS = [RESEARCH_AGENT_NAME, AUTO_TRADING_AGENT_NAME, NEWS_AGENT_NAME]
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 PYTHON_DIR = PROJECT_DIR / "python"
@@ -50,6 +48,17 @@ ENV_PATH = PROJECT_DIR / ".env"
 PROJECT_DIR_STR = PROJECT_DIR.as_posix()
 PYTHON_DIR_STR = PYTHON_DIR.as_posix()
 ENV_PATH_STR = ENV_PATH.as_posix()
+
+AUTO_TRADING_ENV_OVERRIDES = {
+    "AUTO_TRADING_EXCHANGE": os.getenv("AUTO_TRADING_EXCHANGE"),
+}
+AUTO_TRADING_ENV_PREFIX = " ".join(
+    f"{key}={value}"
+    for key, value in AUTO_TRADING_ENV_OVERRIDES.items()
+    if value not in (None, "")
+)
+if AUTO_TRADING_ENV_PREFIX:
+    AUTO_TRADING_ENV_PREFIX = f"{AUTO_TRADING_ENV_PREFIX} "
 
 # Mapping from agent name to launch command
 MAP_NAME_COMMAND: Dict[str, str] = {}
@@ -64,7 +73,10 @@ MAP_NAME_COMMAND[RESEARCH_AGENT_NAME] = (
     f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.research_agent'
 )
 MAP_NAME_COMMAND[AUTO_TRADING_AGENT_NAME] = (
-    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.auto_trading_agent'
+    f'{AUTO_TRADING_ENV_PREFIX}uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.auto_trading_agent'
+)
+MAP_NAME_COMMAND[NEWS_AGENT_NAME] = (
+    f'uv run --env-file "{ENV_PATH_STR}" -m valuecell.agents.news_agent'
 )
 BACKEND_COMMAND = (
     f'cd "{PYTHON_DIR_STR}" && uv run --env-file "{ENV_PATH_STR}" -m valuecell.server.main'

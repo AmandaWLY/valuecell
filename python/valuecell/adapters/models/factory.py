@@ -180,41 +180,132 @@ class GoogleProvider(ModelProvider):
         return GeminiEmbedder(
             id=model_id,
             api_key=self.config.api_key,
-            dimensions=params.get("dimensions", 3072),
+            dimensions=int(params.get("dimensions", 3072)),
             task_type=params.get("task_type", "RETRIEVAL_DOCUMENT"),
         )
 
 
 class AzureProvider(ModelProvider):
-    """Azure OpenAI model provider"""
+    """Azure OpenAI model provider
+
+    Azure OpenAI is a managed service providing OpenAI models deployed on Azure infrastructure.
+    It uses deployment names instead of model IDs, and requires both API key and endpoint.
+
+    Configuration:
+    - AZURE_OPENAI_API_KEY: API key from Azure Portal
+    - AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint URL
+    - api_version: API version for Azure OpenAI REST API (default: 2024-10-21)
+    """
 
     def create_model(self, model_id: Optional[str] = None, **kwargs):
-        """Create Azure OpenAI model"""
+        """Create Azure OpenAI model
+
+        Args:
+            model_id: Deployment name in Azure (uses default if None)
+            **kwargs: Additional model parameters
+
+        Returns:
+            AzureOpenAI model instance
+        """
         try:
-            # Try to import from agno first
             from agno.models.azure import AzureOpenAI
         except ImportError:
-            raise ImportError("No Azure OpenAI library found")
+            raise ImportError(
+                "agno package with Azure support not installed. "
+                "Install with: pip install agno[azure]"
+            )
 
-        model_id = model_id or self.config.default_model
+        # Use provided model_id or default
+        deployment_name = model_id or self.config.default_model
+
+        # Merge parameters: provider defaults < kwargs
         params = {**self.config.parameters, **kwargs}
 
+        # Get API version from config (can be overridden by env var)
+        # The api_version field in azure.yaml is handled by env_overrides
         api_version = self.config.extra_config.get("api_version", "2024-10-21")
 
-        logger.info(f"Creating Azure OpenAI model: {model_id}")
+        logger.info(
+            f"Creating Azure OpenAI model: deployment={deployment_name}, "
+            f"endpoint={self.config.base_url}, api_version={api_version}"
+        )
 
         return AzureOpenAI(
-            deployment_name=model_id,
+            deployment_name=deployment_name,
             api_key=self.config.api_key,
             azure_endpoint=self.config.base_url,
             api_version=api_version,
             temperature=params.get("temperature"),
             max_tokens=params.get("max_tokens"),
+            top_p=params.get("top_p"),
+            frequency_penalty=params.get("frequency_penalty"),
+            presence_penalty=params.get("presence_penalty"),
+        )
+
+    def create_embedder(self, model_id: Optional[str] = None, **kwargs):
+        """Create embedder via Azure OpenAI (OpenAI-compatible)
+
+        Args:
+            model_id: Embedding deployment name in Azure (uses default if None)
+            **kwargs: Additional embedder parameters
+
+        Returns:
+            OpenAIEmbedder instance configured for Azure
+        """
+        try:
+            from agno.knowledge.embedder.openai import OpenAIEmbedder
+        except ImportError:
+            raise ImportError("agno package not installed")
+
+        # Use provided model_id or default embedding model
+        deployment_name = model_id or self.config.default_embedding_model
+
+        if not deployment_name:
+            raise ValueError(
+                f"No embedding model specified for provider '{self.config.name}'. "
+                "Set 'embedding.default_model' in azure.yaml"
+            )
+
+        # Merge parameters: provider embedding defaults < kwargs
+        params = {**self.config.embedding_parameters, **kwargs}
+
+        logger.info(
+            f"Creating Azure OpenAI embedder: deployment={deployment_name}, "
+            f"endpoint={self.config.base_url}"
+        )
+
+        return OpenAIEmbedder(
+            id=deployment_name,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            dimensions=int(params.get("dimensions", 1536))
+            if params.get("dimensions")
+            else None,
+            encoding_format=params.get("encoding_format", "float"),
         )
 
     def is_available(self) -> bool:
-        """Azure needs both API key and endpoint"""
-        return bool(self.config.api_key and self.config.base_url)
+        """Azure needs both API key and endpoint to be available
+
+        Returns:
+            True if both API key and endpoint are configured
+        """
+        has_key = bool(self.config.api_key)
+        has_endpoint = bool(self.config.base_url)
+
+        if not has_key:
+            logger.warning(
+                "Azure OpenAI API key not configured. "
+                "Set AZURE_OPENAI_API_KEY environment variable."
+            )
+
+        if not has_endpoint:
+            logger.warning(
+                "Azure OpenAI endpoint not configured. "
+                "Set AZURE_OPENAI_ENDPOINT environment variable."
+            )
+
+        return has_key and has_endpoint
 
 
 class SiliconFlowProvider(ModelProvider):
@@ -264,9 +355,137 @@ class SiliconFlowProvider(ModelProvider):
             id=model_id,
             api_key=self.config.api_key,
             base_url=self.config.base_url,
-            dimensions=params.get("dimensions", 1024),
+            dimensions=int(params.get("dimensions", 1024)),
             encoding_format=params.get("encoding_format"),
         )
+
+
+class OpenAIProvider(ModelProvider):
+    """OpenAI model provider"""
+
+    def create_model(self, model_id: Optional[str] = None, **kwargs):
+        """Create OpenAI model via agno"""
+        try:
+            from agno.models.openai import OpenAIChat
+        except ImportError:
+            raise ImportError(
+                "agno package not installed. Install with: pip install agno"
+            )
+
+        model_id = model_id or self.config.default_model
+        params = {**self.config.parameters, **kwargs}
+
+        logger.info(f"Creating OpenAI model: {model_id}")
+
+        return OpenAIChat(
+            id=model_id,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            temperature=params.get("temperature"),
+            max_tokens=params.get("max_tokens"),
+            top_p=params.get("top_p"),
+            frequency_penalty=params.get("frequency_penalty"),
+            presence_penalty=params.get("presence_penalty"),
+        )
+
+    def create_embedder(self, model_id: Optional[str] = None, **kwargs):
+        """Create embedder via OpenAI"""
+        try:
+            from agno.knowledge.embedder.openai import OpenAIEmbedder
+        except ImportError:
+            raise ImportError("agno package not installed")
+
+        # Use provided model_id or default embedding model
+        model_id = model_id or self.config.default_embedding_model
+
+        if not model_id:
+            raise ValueError(
+                f"No embedding model specified for provider '{self.config.name}'"
+            )
+
+        # Merge parameters: provider embedding defaults < kwargs
+        params = {**self.config.embedding_parameters, **kwargs}
+
+        logger.info(f"Creating OpenAI embedder: {model_id}")
+
+        return OpenAIEmbedder(
+            id=model_id,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            dimensions=int(params.get("dimensions", 1536))
+            if params.get("dimensions")
+            else None,
+            encoding_format=params.get("encoding_format", "float"),
+        )
+
+
+class OpenAICompatibleProvider(ModelProvider):
+    """OpenAI-compatible model provider with role compatibility handling
+
+    This provider handles OpenAI-compatible APIs (like DashScope, vLLM, etc.) that may not
+    support newer OpenAI features like the 'developer' role. It wraps the OpenAIChat model
+    and converts incompatible roles to compatible ones.
+    """
+
+    def create_model(self, model_id: Optional[str] = None, **kwargs):
+        """Create OpenAI-compatible model via agno with role compatibility"""
+        try:
+            from agno.models.openai import OpenAILike
+        except ImportError:
+            raise ImportError(
+                "agno package not installed. Install with: pip install agno"
+            )
+
+        model_id = model_id or self.config.default_model
+        params = {**self.config.parameters, **kwargs}
+
+        logger.info(
+            f"Creating OpenAI-compatible model: {model_id} (base_url: {self.config.base_url})"
+        )
+
+        # Create the base OpenAILike model
+        return OpenAILike(
+            id=model_id,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            temperature=params.get("temperature"),
+            max_tokens=params.get("max_tokens"),
+            top_p=params.get("top_p"),
+            frequency_penalty=params.get("frequency_penalty"),
+            presence_penalty=params.get("presence_penalty"),
+        )
+
+    def create_embedder(self, model_id: Optional[str] = None, **kwargs):
+        """Create embedder via OpenAI-compatible API"""
+        try:
+            from agno.knowledge.embedder.openai import OpenAIEmbedder
+        except ImportError:
+            raise ImportError("agno package not installed")
+
+        # Use provided model_id or default embedding model
+        model_id = model_id or self.config.default_embedding_model
+
+        if not model_id:
+            raise ValueError(
+                f"No embedding model specified for provider '{self.config.name}'"
+            )
+
+        # Merge parameters: provider embedding defaults < kwargs
+        params = {**self.config.embedding_parameters, **kwargs}
+
+        logger.info(f"Creating OpenAI-compatible embedder: {model_id}")
+
+        return OpenAIEmbedder(
+            id=model_id,
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            dimensions=int(params.get("dimensions", 1024)),
+            encoding_format=params.get("encoding_format"),
+        )
+
+    def is_available(self) -> bool:
+        """Check if provider is available (needs both API key and base URL)"""
+        return bool(self.config.api_key and self.config.base_url)
 
 
 class ModelFactory:
@@ -286,6 +505,8 @@ class ModelFactory:
         "google": GoogleProvider,
         "azure": AzureProvider,
         "siliconflow": SiliconFlowProvider,
+        "openai": OpenAIProvider,
+        "openai-compatible": OpenAICompatibleProvider,
     }
 
     def __init__(self, config_manager: Optional[ConfigManager] = None):
@@ -313,6 +534,7 @@ class ModelFactory:
         model_id: Optional[str] = None,
         provider: Optional[str] = None,
         use_fallback: bool = True,
+        provider_models: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -327,6 +549,8 @@ class ModelFactory:
             model_id: Specific model ID (optional, uses provider default)
             provider: Provider name (optional, uses primary_provider)
             use_fallback: Try fallback providers if primary fails
+            provider_models: Dict mapping provider names to model IDs for fallback
+                           e.g., {"siliconflow": "deepseek-ai/DeepSeek-V3.1-Terminus"}
             **kwargs: Additional arguments for model creation
 
         Returns:
@@ -340,8 +564,16 @@ class ModelFactory:
             >>> model = factory.create_model()  # Uses primary provider + default model
             >>> model = factory.create_model(provider="google")  # Specific provider
             >>> model = factory.create_model(model_id="gpt-4", provider="openrouter")
+            >>> # With provider-specific models
+            >>> model = factory.create_model(
+            ...     model_id="anthropic/claude-3.5-sonnet",
+            ...     provider="openrouter",
+            ...     provider_models={"siliconflow": "deepseek-ai/DeepSeek-V3.1-Terminus"}
+            ... )
         """
         provider = provider or self.config_manager.primary_provider
+        if provider_models is None:
+            provider_models = {}
 
         # Try primary provider
         try:
@@ -358,9 +590,29 @@ class ModelFactory:
                     continue  # Skip already tried provider
 
                 try:
+                    # Determine model ID for fallback provider
+                    fallback_model_id = model_id
+
+                    # Priority: provider_models > default_model
+                    if fallback_provider in provider_models:
+                        fallback_model_id = provider_models[fallback_provider]
+                        logger.info(
+                            f"Using provider-specific model for {fallback_provider}: {fallback_model_id}"
+                        )
+                    else:
+                        # Use provider's default model
+                        fallback_provider_config = (
+                            self.config_manager.get_provider_config(fallback_provider)
+                        )
+                        if fallback_provider_config:
+                            fallback_model_id = fallback_provider_config.default_model
+                            logger.info(
+                                f"Using default model for {fallback_provider}: {fallback_model_id}"
+                            )
+
                     logger.info(f"Trying fallback provider: {fallback_provider}")
                     return self._create_model_internal(
-                        model_id, fallback_provider, **kwargs
+                        fallback_model_id, fallback_provider, **kwargs
                     )
                 except Exception as fallback_error:
                     logger.warning(
@@ -452,10 +704,135 @@ class ModelFactory:
             f"model_id={model_config.model_id}, provider={model_config.provider}"
         )
 
+        # Check if specified provider is available (has API key)
+        provider = model_config.provider
+        model_id = model_config.model_id
+        is_valid, error_msg = self.config_manager.validate_provider(provider)
+
+        if not is_valid:
+            # If configured provider is not available, use primary provider instead
+            fallback_provider = self.config_manager.primary_provider
+            logger.warning(
+                f"Configured provider '{provider}' for agent '{agent_name}' is not available: {error_msg}. "
+                f"Falling back to primary provider: {fallback_provider}"
+            )
+            provider = fallback_provider
+
+            # Update model_id for the fallback provider
+            # Priority: provider_models[fallback_provider] > provider's default_model
+            if fallback_provider in model_config.provider_models:
+                model_id = model_config.provider_models[fallback_provider]
+                logger.info(
+                    f"Using provider-specific model for fallback: {fallback_provider} -> {model_id}"
+                )
+            else:
+                # Use provider's default model
+                provider_config = self.config_manager.get_provider_config(
+                    fallback_provider
+                )
+                if provider_config:
+                    model_id = provider_config.default_model
+                    logger.info(
+                        f"Using default model for fallback provider '{fallback_provider}': {model_id}"
+                    )
+
         # Create model
         return self.create_model(
-            model_id=model_config.model_id,
-            provider=model_config.provider,
+            model_id=model_id,
+            provider=provider,
+            use_fallback=use_fallback,
+            provider_models=model_config.provider_models,
+            **merged_params,
+        )
+
+    def create_embedder_for_agent(
+        self, agent_name: str, use_fallback: bool = True, **kwargs
+    ):
+        """
+        Create an embedder for a specific agent using its configuration.
+
+        This method will use the agent's `embedding_model` configuration when
+        present. If no embedding config is provided for the agent it will
+        attempt to use the agent's primary model provider and select the
+        provider's default embedding model.
+        """
+        # Get agent configuration
+        agent_config = self.config_manager.get_agent_config(agent_name)
+
+        if not agent_config:
+            raise ValueError(f"Agent configuration not found: {agent_name}")
+
+        if not agent_config.enabled:
+            raise ValueError(f"Agent is disabled: {agent_name}")
+
+        # If agent specifies an embedding_model, use it
+        if agent_config.embedding_model:
+            emb = agent_config.embedding_model
+            merged_params = {**emb.parameters, **kwargs}
+            logger.info(
+                f"Creating embedder for agent '{agent_name}': model_id={emb.model_id}, provider={emb.provider}, params={merged_params}"
+            )
+
+            # Check if specified provider is available (has API key)
+            provider = emb.provider
+            model_id = emb.model_id
+            is_valid, error_msg = self.config_manager.validate_provider(provider)
+
+            if not is_valid:
+                # If configured provider is not available, use primary provider instead
+                fallback_provider = self.config_manager.primary_provider
+                logger.warning(
+                    f"Configured embedding provider '{provider}' for agent '{agent_name}' is not available: {error_msg}. "
+                    f"Falling back to primary provider: {fallback_provider}"
+                )
+                provider = fallback_provider
+
+                # Update model_id for the fallback provider
+                # Priority: provider_models[fallback_provider] > provider's default_embedding_model
+                if fallback_provider in emb.provider_models:
+                    model_id = emb.provider_models[fallback_provider]
+                    logger.info(
+                        f"Using provider-specific embedding model for fallback: {fallback_provider} -> {model_id}"
+                    )
+                else:
+                    # Use provider's default embedding model
+                    provider_config = self.config_manager.get_provider_config(
+                        fallback_provider
+                    )
+                    if provider_config and provider_config.default_embedding_model:
+                        model_id = provider_config.default_embedding_model
+                        logger.info(
+                            f"Using default embedding model for fallback provider '{fallback_provider}': {model_id}"
+                        )
+
+            return self.create_embedder(
+                model_id=model_id or None,
+                provider=provider,
+                use_fallback=use_fallback,
+                **merged_params,
+            )
+
+        # Fallback: use primary model's provider and let factory pick provider default
+        primary = agent_config.primary_model
+        merged_params = {**primary.parameters, **kwargs}
+        logger.info(
+            f"Creating embedder for agent '{agent_name}' using primary provider: {primary.provider}"
+        )
+
+        # Check if primary provider is available
+        provider = primary.provider
+        is_valid, error_msg = self.config_manager.validate_provider(provider)
+
+        if not is_valid:
+            logger.warning(
+                f"Primary provider '{provider}' for agent '{agent_name}' is not available: {error_msg}. "
+                f"Using system primary provider: {self.config_manager.primary_provider}"
+            )
+            provider = self.config_manager.primary_provider
+
+        return self.create_embedder(
+            model_id=None,
+            provider=provider,
             use_fallback=use_fallback,
             **merged_params,
         )
@@ -769,3 +1146,18 @@ def create_embedder(
     """
     factory = get_model_factory()
     return factory.create_embedder(model_id, provider, **kwargs)
+
+
+def create_embedder_for_agent(agent_name: str, **kwargs):
+    """
+    Convenience function to create an embedder configured for a specific agent.
+
+    Args:
+        agent_name: Agent name
+        **kwargs: Override parameters
+
+    Returns:
+        Embedder instance
+    """
+    factory = get_model_factory()
+    return factory.create_embedder_for_agent(agent_name, **kwargs)

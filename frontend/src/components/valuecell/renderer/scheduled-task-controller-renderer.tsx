@@ -1,24 +1,31 @@
 import { parse } from "best-effort-json-parser";
 import { Clock } from "lucide-react";
-import { type FC, memo, useState } from "react";
+import { type FC, memo, useEffect, useState } from "react";
+import { useCancelTask } from "@/api/conversation";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { ScheduledTaskControllerRendererProps } from "@/types/renderer";
 
 const ScheduledTaskControllerRenderer: FC<
   ScheduledTaskControllerRendererProps
 > = ({ content }) => {
-  const { task_title, task_id } = parse(content);
-  const [isRunning, setIsRunning] = useState(false);
+  const { task_title, task_id, task_status } = parse(content);
+  const [isRunning, setIsRunning] = useState(task_status !== "cancelled");
+  const { mutateAsync: cancelTask } = useCancelTask();
 
-  const handleToggle = () => {
-    // TODO: Implement actual task control logic with task_id
-    console.log(`Toggling task ${task_id}:`, isRunning ? "pause" : "start");
-    setIsRunning(!isRunning);
+  useEffect(() => {
+    setIsRunning(task_status !== "cancelled");
+  }, [task_status]);
+
+  const handleCancel = async () => {
+    const res = await cancelTask(task_id);
+    res.code === 0 && setIsRunning(false);
   };
 
   return (
     <div className="flex min-w-96 items-center justify-between gap-3 rounded-xl bg-gray-50 px-4 py-3">
       <div className="flex shrink-0 items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+        <div className="flex size-8 shrink-0 items-center justify-center">
           <Clock className="size-5 text-primary" />
         </div>
         <p className="font-medium text-base text-gray-950">
@@ -27,12 +34,17 @@ const ScheduledTaskControllerRenderer: FC<
       </div>
 
       {/* Right: Control Text Button */}
-      <p
-        onClick={handleToggle}
-        className="cursor-pointer text-base text-blue-500 transition-colors hover:text-blue-500/80"
+      <Button
+        onClick={handleCancel}
+        variant="ghost"
+        size="sm"
+        disabled={!isRunning}
+        className={cn(
+          "cursor-pointer text-base text-blue-500 transition-colors hover:text-blue-500/80 disabled:text-gray-400",
+        )}
       >
-        Pause
-      </p>
+        {isRunning ? "Cancel" : "Cancelled"}
+      </Button>
     </div>
   );
 };

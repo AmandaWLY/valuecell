@@ -90,22 +90,12 @@ export function useSparklineStocks(
           ],
         );
 
-        // Extract current price (remove currency symbols and formatting)
-        const currentPrice = parseFloat(
-          priceData.price_formatted?.replace(/[^0-9.-]/g, "") || "N/A",
-        );
-
-        // Extract change percentage (remove % symbol)
-        const changePercent = parseFloat(
-          priceData.change_percent_formatted?.replace(/[^0-9.-]/g, "") || "N/A",
-        );
-
         result.push({
           symbol: stock.symbol,
-          price: currentPrice,
-          currency: "$", // Default USD, can be adjusted as needed
+          price: priceData.price,
+          currency: priceData.currency || "USD", // Use actual currency from API
           changeAmount: priceData.change,
-          changePercent: changePercent,
+          changePercent: priceData.change_percent,
           sparklineData: sparklineData,
         });
       }

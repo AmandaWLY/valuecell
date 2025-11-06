@@ -35,21 +35,22 @@ const ScheduledTaskResultComponent: FC<{ tasks: Record<string, TaskView> }> = ({
     taskList[0]?.id || "",
   );
 
-  // Get items for the selected task
+  // Get items for the selected task and reverse them
   const selectedItems = useMemo(() => {
     const selectedTask = taskList.find((task) => task.id === selectedTaskId);
-    return selectedTask?.items || [];
+    const items = selectedTask?.items || [];
+    return [...items].reverse();
   }, [taskList, selectedTaskId]);
 
   return selectedItemContent ? (
-    <section className="flex flex-1 flex-col py-6">
+    <section className="flex flex-1 flex-col border-gray-200 border-l px-5 py-6">
       <BackButton className="mb-3" onClick={() => setSelectedItemContent("")} />
       <ScrollContainer className="flex-1">
         <MarkdownRenderer content={selectedItemContent} />
       </ScrollContainer>
     </section>
   ) : (
-    <section className="flex flex-1 flex-col gap-5 py-6">
+    <section className="flex flex-1 flex-col gap-5 border-gray-200 border-l px-5 py-6">
       {/* Task Selector */}
       {taskList.length > 0 && (
         <Select value={selectedTaskId} onValueChange={setSelectedTaskId}>
@@ -96,9 +97,9 @@ const ModelTradeComponent: FC<{ tasks: Record<string, TaskView> }> = ({
   const items = Object.values(tasks).flatMap((task) => task.items);
 
   return (
-    <ScrollContainer className="min-w-[540px] flex-1 px-4">
+    <ScrollContainer className="min-w-[540px] flex-2 border-gray-200 border-l px-1">
       {items.length > 0 && (
-        <div className="h-full space-y-3 p-4">
+        <div className="h-full space-y-3">
           {items.map(
             (item) =>
               item.payload && (
@@ -120,7 +121,7 @@ const ModelTradeTableComponent: FC<{ tasks: Record<string, TaskView> }> = ({
   const items = Object.values(tasks).flatMap((task) => task.items);
 
   return (
-    <ScrollContainer className="w-[404px] shrink-0 overflow-hidden px-4">
+    <ScrollContainer className="w-[364px] shrink-0 overflow-hidden border-gray-200 border-l px-2">
       {items.length > 0 && (
         <div className="space-y-3">
           {items.map(

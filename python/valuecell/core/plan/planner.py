@@ -19,12 +19,12 @@ from a2a.types import AgentCard
 from agno.agent import Agent
 from agno.db.in_memory import InMemoryDb
 
+import valuecell.utils.model as model_utils_mod
 from valuecell.core.agent.connect import RemoteConnections
 from valuecell.core.task.models import Task, TaskStatus
 from valuecell.core.types import UserInput
 from valuecell.utils import generate_uuid
 from valuecell.utils.env import agent_debug_mode_enabled
-from valuecell.utils.model import get_model
 from valuecell.utils.uuid import generate_conversation_id
 
 from .models import ExecutionPlan, PlannerInput, PlannerResponse
@@ -88,11 +88,14 @@ class ExecutionPlanner:
         agent_connections: RemoteConnections,
     ):
         self.agent_connections = agent_connections
-        self.planner_agent = Agent(
-            model=get_model("PLANNER_MODEL_ID"),
+        # Fetch model via utils module reference so tests can monkeypatch it reliably
+        model = model_utils_mod.get_model_for_agent("super_agent")
+        self.agent = Agent(
+            model=model,
             tools=[
                 # TODO: enable UserControlFlowTools when stable
                 # UserControlFlowTools(),
+                self.tool_get_agent_description,
                 self.tool_get_enabled_agents,
             ],
             debug_mode=agent_debug_mode_enabled(),
@@ -101,6 +104,7 @@ class ExecutionPlanner:
             markdown=False,
             output_schema=PlannerResponse,
             expected_output=PLANNER_EXPECTED_OUTPUT,
+            use_json_mode=model_utils_mod.model_should_use_json_mode(model),
             # context
             db=InMemoryDb(),
             add_datetime_to_context=True,
@@ -179,7 +183,7 @@ class ExecutionPlanner:
             If plan is inadequate, returns empty list with guidance message.
         """
         # Execute planning with the agent
-        run_response = self.planner_agent.run(
+        run_response = self.agent.run(
             PlannerInput(
                 target_agent_name=user_input.target_agent_name,
                 query=user_input.query,
@@ -202,7 +206,7 @@ class ExecutionPlanner:
                     field.value = user_value
 
             # Continue agent execution with updated inputs
-            run_response = self.planner_agent.continue_run(
+            run_response = self.agent.continue_run(
                 # TODO: rollback to `run_id=run_response.run_id` when bug fixed by Agno
                 run_response=run_response,
                 updated_tools=run_response.tools,
@@ -213,6 +217,16 @@ class ExecutionPlanner:
 
         # Parse planning result and create tasks
         plan_raw = run_response.content
+        if not isinstance(plan_raw, PlannerResponse):
+            model = self.agent.model
+            model_description = f"{model.id} (via {model.provider})"
+            return (
+                [],
+                (
+                    f"Planner produced a malformed response: `{plan_raw}`. "
+                    f"Please check the capabilities of your model `{model_description}` and try again later."
+                ),
+            )
         logger.info(f"Planner produced plan: {plan_raw}")
 
         # Check if plan is inadequate or has no tasks

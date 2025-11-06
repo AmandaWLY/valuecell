@@ -59,7 +59,8 @@ async def test_create_plan_handles_paused_run(monkeypatch: pytest.MonkeyPatch):
 
     class FakeAgent:
         def __init__(self, *args, **kwargs):
-            pass
+            # Provide minimal model info for error formatting paths
+            self.model = SimpleNamespace(id="fake-model", provider="fake-provider")
 
         def run(self, *args, **kwargs):
             return paused_response
@@ -69,7 +70,7 @@ async def test_create_plan_handles_paused_run(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(planner_mod, "Agent", FakeAgent)
     monkeypatch.setattr(
-        model_utils_mod, "create_model", lambda *args, **kwargs: "stub-model"
+        model_utils_mod, "get_model_for_agent", lambda *args, **kwargs: "stub-model"
     )
     monkeypatch.setattr(planner_mod, "agent_debug_mode_enabled", lambda: False)
 
@@ -120,7 +121,7 @@ async def test_create_plan_raises_on_inadequate_plan(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(planner_mod, "Agent", FakeAgent)
     monkeypatch.setattr(
-        model_utils_mod, "create_model", lambda *args, **kwargs: "stub-model"
+        model_utils_mod, "get_model_for_agent", lambda *args, **kwargs: "stub-model"
     )
     monkeypatch.setattr(planner_mod, "agent_debug_mode_enabled", lambda: False)
 
@@ -142,7 +143,7 @@ async def test_create_plan_raises_on_inadequate_plan(monkeypatch: pytest.MonkeyP
 def test_tool_get_enabled_agents_formats_cards(monkeypatch: pytest.MonkeyPatch):
     # Mock create_model to avoid API key validation in CI
     monkeypatch.setattr(
-        model_utils_mod, "create_model", lambda *args, **kwargs: "stub-model"
+        model_utils_mod, "get_model_for_agent", lambda *args, **kwargs: "stub-model"
     )
     monkeypatch.setattr(planner_mod, "agent_debug_mode_enabled", lambda: False)
 
@@ -165,3 +166,76 @@ def test_tool_get_enabled_agents_formats_cards(monkeypatch: pytest.MonkeyPatch):
     assert "<AgentAlpha>" in output
     assert "Lookup" in output
     assert "</AgentAlpha>" in output
+
+
+@pytest.mark.asyncio
+async def test_create_plan_handles_malformed_response(monkeypatch: pytest.MonkeyPatch):
+    """Planner returns non-PlannerResponse content -> guidance message with error."""
+
+    malformed_content = "not-a-planner-response"
+
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            # Provide minimal model attributes for error formatting
+            self.model = SimpleNamespace(id="fake-model", provider="fake-provider")
+
+        def run(self, *args, **kwargs):
+            return SimpleNamespace(
+                is_paused=False,
+                tools_requiring_user_input=[],
+                tools=[],
+                content=malformed_content,
+            )
+
+    monkeypatch.setattr(planner_mod, "Agent", FakeAgent)
+    # Use utils module API for model stubbing per planner implementation
+    monkeypatch.setattr(
+        model_utils_mod, "get_model_for_agent", lambda *args, **kwargs: "stub-model"
+    )
+    monkeypatch.setattr(planner_mod, "agent_debug_mode_enabled", lambda: False)
+
+    planner = ExecutionPlanner(StubConnections())
+    # Ensure planner has an agent set even if __init__ path changes in future
+    planner.agent = FakeAgent()
+
+    user_input = UserInput(
+        query="malformed please",
+        target_agent_name="",
+        meta=UserInputMetadata(conversation_id="conv-x", user_id="user-x"),
+    )
+
+    async def callback(_):
+        raise AssertionError("callback should not be invoked for malformed response")
+
+    plan = await planner.create_plan(user_input, callback, "thread-x")
+
+    # Should return no tasks and a guidance message explaining the issue
+    assert plan.tasks == []
+    assert plan.guidance_message
+    assert "malformed response" in plan.guidance_message
+    assert malformed_content in plan.guidance_message
+
+
+def test_tool_get_agent_description_dict_and_missing(monkeypatch: pytest.MonkeyPatch):
+    """Cover dict formatting branch and not-found fallback in agent description."""
+
+    class Conn(StubConnections):
+        def __init__(self):
+            super().__init__({"DictAgent": {"name": "DictAgent", "desc": "d"}})
+
+    # Avoid real model creation in planner __init__
+    monkeypatch.setattr(
+        model_utils_mod, "get_model_for_agent", lambda *args, **kwargs: "stub-model"
+    )
+    monkeypatch.setattr(planner_mod, "agent_debug_mode_enabled", lambda: False)
+
+    planner = ExecutionPlanner(Conn())
+
+    # Dict branch returns str(dict)
+    out = planner.tool_get_agent_description("DictAgent")
+    assert isinstance(out, str)
+    assert "DictAgent" in out
+
+    # Not found branch
+    missing = planner.tool_get_agent_description("MissingAgent")
+    assert "could not be found" in missing

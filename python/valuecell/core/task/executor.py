@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import AsyncGenerator, Iterable, Optional
+from typing import AsyncGenerator, Awaitable, Callable, Iterable, Optional
 
 from a2a.types import TaskArtifactUpdateEvent, TaskState, TaskStatusUpdateEvent
 from loguru import logger
@@ -45,7 +45,7 @@ class ScheduledTaskResultAccumulator:
 
     @property
     def enabled(self) -> bool:
-        return self._task.schedule_config is not None
+        return self._task.is_scheduled()
 
     def consume(self, responses: Iterable[BaseResponse]) -> list[BaseResponse]:
         if not self.enabled:
@@ -122,17 +122,37 @@ class TaskExecutor:
                 thread_id=thread_id,
                 task_id=generate_task_id(),
                 content=plan.guidance_message,
+                agent_name="Planner",
             )
             yield await self._event_service.emit(response)
             return
 
         for task in plan.tasks:
             subagent_component_id = generate_item_id()
+            # Define a one-time emitter for subagent END component (used in two places)
+            end_component_emitted = False
+
+            async def emit_subagent_end_once() -> Optional[BaseResponse]:
+                nonlocal end_component_emitted
+                if not task.handoff_from_super_agent:
+                    return None
+                if end_component_emitted:
+                    return None
+                end_component_emitted = True
+                return await self._emit_subagent_conversation_component(
+                    plan.conversation_id,
+                    thread_id,
+                    task,
+                    subagent_component_id,
+                    SubagentConversationPhase.END,
+                )
+
             if task.handoff_from_super_agent:
                 await self._conversation_service.ensure_conversation(
                     user_id=plan.user_id,
                     conversation_id=task.conversation_id,
                     agent_name=task.agent_name,
+                    title=task.title,
                 )
 
                 # Emit subagent conversation start component
@@ -153,7 +173,16 @@ class TaskExecutor:
 
             try:
                 await self._task_service.update_task(task)
-                async for response in self._execute_task(task, thread_id, metadata):
+                async for response in self._execute_task(
+                    task,
+                    thread_id,
+                    metadata,
+                    on_before_done=(
+                        emit_subagent_end_once
+                        if task.handoff_from_super_agent
+                        else None
+                    ),
+                ):
                     yield response
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_msg = f"(Error) Error executing {task.task_id}: {exc}"
@@ -168,14 +197,10 @@ class TaskExecutor:
                 yield await self._event_service.emit(failure)
             finally:
                 if task.handoff_from_super_agent:
-                    # Emit subagent conversation end component
-                    yield await self._emit_subagent_conversation_component(
-                        plan.conversation_id,
-                        thread_id,
-                        task,
-                        subagent_component_id,
-                        SubagentConversationPhase.END,
-                    )
+                    # Emit subagent conversation end component (only if not already emitted)
+                    end_resp = await emit_subagent_end_once()
+                    if end_resp is not None:
+                        yield end_resp
 
     async def _emit_subagent_conversation_component(
         self,
@@ -209,6 +234,10 @@ class TaskExecutor:
         task: Task,
         thread_id: str,
         metadata: Optional[dict] = None,
+        *,
+        on_before_done: Optional[
+            Callable[[], Awaitable[Optional[BaseResponse]]]
+        ] = None,
     ) -> AsyncGenerator[BaseResponse, None]:
         task_id = task.task_id
         conversation_id = task.conversation_id
@@ -227,7 +256,7 @@ class TaskExecutor:
             },
         )
 
-        if task.schedule_config:
+        if task.is_scheduled():
             yield await self._event_service.emit(
                 self._event_service.factory.schedule_task_controller_component(
                     conversation_id=conversation_id,
@@ -235,6 +264,11 @@ class TaskExecutor:
                     task=task,
                 )
             )
+            # Optionally emit a one-time subagent END before sending done
+            if on_before_done is not None:
+                maybe_resp = await on_before_done()
+                if maybe_resp is not None:
+                    yield maybe_resp
             yield await self._event_service.emit(
                 self._event_service.factory.done(
                     conversation_id=conversation_id,
@@ -242,16 +276,16 @@ class TaskExecutor:
                 )
             )
 
-        accumulator = ScheduledTaskResultAccumulator(task)
-
         try:
             while True:
                 async for response in self._execute_single_task_run(
-                    task, thread_id, exec_metadata, accumulator
+                    task,
+                    thread_id,
+                    exec_metadata,
                 ):
                     yield response
 
-                if not task.schedule_config:
+                if not task.is_scheduled():
                     break
 
                 delay = calculate_next_execution_delay(task.schedule_config)
@@ -264,6 +298,7 @@ class TaskExecutor:
                 await self._sleep_with_cancellation(task, delay)
 
                 if task.is_finished():
+                    logger.info(f"Task `{task.title}` ({task_id}) is finished.")
                     break
 
             await self._task_service.complete_task(task_id)
@@ -289,7 +324,6 @@ class TaskExecutor:
         task: Task,
         thread_id: str,
         metadata: dict,
-        accumulator: ScheduledTaskResultAccumulator,
     ) -> AsyncGenerator[BaseResponse, None]:
         agent_name = task.agent_name
         client = await self._agent_connections.get_client(agent_name)
@@ -302,6 +336,7 @@ class TaskExecutor:
             metadata=metadata,
         )
 
+        accumulator = ScheduledTaskResultAccumulator(task)
         async for remote_task, event in remote_response:
             if event is None and remote_task.status.state == TaskState.submitted:
                 task.remote_task_ids.append(remote_task.id)
